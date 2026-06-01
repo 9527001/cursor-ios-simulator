@@ -1,0 +1,112 @@
+{
+  "name": "cursor-ios-simulator",
+  "displayName": "iOS Simulator Mirror",
+  "description": "Headless iOS Simulator mirror for Cursor/VS Code — real-time mirror, touch input, a11y annotations, device picker, keyboard.",
+  "version": "0.4.0",
+  "publisher": "9527001",
+  "license": "MIT",
+  "homepage": "https://github.com/9527001/cursor-ios-simulator#readme",
+  "bugs": {
+    "url": "https://github.com/9527001/cursor-ios-simulator/issues"
+  },
+  "galleryBanner": {
+    "color": "#1e1e1e",
+    "theme": "dark"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/9527001/cursor-ios-simulator.git"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["Other"],
+  "keywords": ["ios", "simulator", "mobile", "flutter", "mirror"],
+  "activationEvents": ["onView:ios-simulator.panel"],
+  "main": "./out/extension.js",
+  "contributes": {
+    "configuration": {
+      "title": "iOS Simulator",
+      "properties": {
+        "iosSimulator.autoBoot": {
+          "type": "boolean",
+          "default": true,
+          "description": "无 booted 模拟器时在后台自动启动默认 iPhone（不阻塞面板首帧）。"
+        },
+        "iosSimulator.prefetchXcodebuildMcp": {
+          "type": "boolean",
+          "default": true,
+          "description": "面板打开后在后台预热 npx xcodebuildmcp（仅加速标注 a11y，可关闭）。"
+        },
+        "iosSimulator.maxFps": {
+          "type": "number",
+          "default": 20,
+          "minimum": 8,
+          "maximum": 60,
+          "description": "镜像推送帧率上限（自适应开启时为上限，关闭时为固定值）。"
+        },
+        "iosSimulator.adaptiveSmoothness": {
+          "type": "boolean",
+          "default": true,
+          "description": "根据卡顿自动调节 fps / 分辨率 / JPEG 质量（推荐开启）。"
+        }
+      }
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "ios-simulator",
+          "title": "iOS Simulator",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "ios-simulator": [
+        {
+          "id": "ios-simulator.panel",
+          "name": "Simulator",
+          "type": "webview"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "ios-simulator.open",
+        "title": "Open iOS Simulator Panel",
+        "category": "iOS Simulator"
+      },
+      {
+        "command": "ios-simulator.refresh",
+        "title": "Refresh Simulator Stream",
+        "category": "iOS Simulator"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "ios-simulator.open",
+        "key": "cmd+y",
+        "mac": "cmd+y"
+      }
+    ]
+  },
+  "scripts": {
+    "setup": "bash scripts/setup.sh",
+    "build": "npm run compile && npm run compile-helpers",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "compile-helpers": "bash scripts/compile-helpers.sh bin",
+    "package": "mkdir -p dist && vsce package --out dist/cursor-ios-simulator.vsix",
+    "install:local": "bash scripts/install-local.sh",
+    "install:vscode": "EDITOR=code bash scripts/install-local.sh",
+    "publish:openvsx": "bash scripts/publish-openvsx.sh --publish",
+    "release": "bash scripts/release.sh",
+    "vscode:prepublish": "npm run compile && npm run compile-helpers"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^3.2.1",
+    "typescript": "^5.3.3"
+  }
+}
