@@ -2,7 +2,7 @@
   "name": "cursor-ios-simulator",
   "displayName": "iOS Simulator Mirror",
   "description": "Headless iOS Simulator mirror for Cursor/VS Code — real-time mirror, touch input, a11y annotations, device picker, keyboard.",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "publisher": "9527001",
   "license": "MIT",
   "homepage": "https://github.com/9527001/cursor-ios-simulator#readme",
@@ -20,9 +20,19 @@
   "engines": {
     "vscode": "^1.85.0"
   },
-  "categories": ["Other"],
-  "keywords": ["ios", "simulator", "mobile", "flutter", "mirror"],
-  "activationEvents": ["onView:ios-simulator.panel"],
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "ios",
+    "simulator",
+    "mobile",
+    "flutter",
+    "mirror"
+  ],
+  "activationEvents": [
+    "onView:ios-simulator.panel"
+  ],
   "main": "./out/extension.js",
   "contributes": {
     "configuration": {
