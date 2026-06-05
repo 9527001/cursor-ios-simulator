@@ -29,6 +29,7 @@ import {
   SmoothnessTuner,
   StreamProfile,
 } from './smoothnessTuner';
+import { presentError } from './issueReporter';
 
 export class SimulatorPanelProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'ios-simulator.panel';
@@ -47,6 +48,9 @@ export class SimulatorPanelProvider implements vscode.WebviewViewProvider {
   private tuner: SmoothnessTuner | null = null;
   private appliedProfile: StreamProfile | null = null;
   private evalTimer: ReturnType<typeof setInterval> | null = null;
+  private lastErrorKey: string | null = null;
+  private lastErrorAt = 0;
+  private static readonly ERROR_NOTIFY_WINDOW_MS = 15000;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -82,10 +86,10 @@ export class SimulatorPanelProvider implements vscode.WebviewViewProvider {
         this.streamInfo = null;
         this.view.webview.postMessage({ type: 'no-booted-device' });
       } else if (s.type === 'error') {
-        this.view.webview.postMessage({
-          type: 'error',
-          message: (status as { message: string }).message,
-        });
+        this.surfaceError(
+          (status as { message: string }).message,
+          'capture',
+        );
       }
     });
 
@@ -177,6 +181,39 @@ export class SimulatorPanelProvider implements vscode.WebviewViewProvider {
     this.stopStream();
   }
 
+  /**
+   * 统一错误出口：更新 webview 状态，并弹出可「报告到 GitHub」的原生通知。
+   * 同一错误在短窗口内只通知一次，避免重连等场景刷屏。
+   */
+  private surfaceError(
+    message: string,
+    source: string,
+    detail?: string,
+  ): void {
+    this.view?.webview.postMessage({ type: 'error', message });
+    this.maybeNotifyError(message, source, detail);
+  }
+
+  /** 去抖弹出可「报告到 GitHub」的原生通知（不触碰 webview 渲染）。 */
+  private maybeNotifyError(
+    message: string,
+    source: string,
+    detail?: string,
+  ): void {
+    const key = `${source}:${message}`;
+    const now = Date.now();
+    if (
+      this.lastErrorKey === key &&
+      now - this.lastErrorAt < SimulatorPanelProvider.ERROR_NOTIFY_WINDOW_MS
+    ) {
+      return;
+    }
+    this.lastErrorKey = key;
+    this.lastErrorAt = now;
+
+    void presentError({ message, source, detail }, this.extensionPath);
+  }
+
   private readAdaptiveSmoothness(): boolean {
     return vscode.workspace
       .getConfiguration('iosSimulator')
@@ -209,11 +246,18 @@ export class SimulatorPanelProvider implements vscode.WebviewViewProvider {
     const pf = runPreflight();
     if (!pf.ok) {
       this.preflightOk = false;
+      const message = pf.message ?? 'Preflight failed.';
+      const hint = pf.hint ?? '';
       this.view?.webview.postMessage({
         type: 'preflight-failed',
-        message: pf.message ?? 'Preflight failed.',
-        hint: pf.hint ?? '',
+        message,
+        hint,
       });
+      this.maybeNotifyError(
+        message,
+        'preflight',
+        hint ? `${message}\n\n${hint}` : message,
+      );
       return;
     }
     this.preflightOk = true;
@@ -388,7 +432,7 @@ export class SimulatorPanelProvider implements vscode.WebviewViewProvider {
         return;
       }
       const message = err instanceof Error ? err.message : String(err);
-      this.view.webview.postMessage({ type: 'error', message });
+      this.surfaceError(message, 'startup', errorDetail(err));
     }
   }
 
@@ -411,7 +455,7 @@ export class SimulatorPanelProvider implements vscode.WebviewViewProvider {
       this.startStream();
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      this.view?.webview.postMessage({ type: 'error', message });
+      this.surfaceError(message, 'helpers', errorDetail(err));
     }
   }
 
@@ -483,7 +527,7 @@ export class SimulatorPanelProvider implements vscode.WebviewViewProvider {
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      this.view?.webview.postMessage({ type: 'error', message });
+      this.surfaceError(message, 'device-select', errorDetail(err));
     }
   }
 
@@ -502,10 +546,7 @@ export class SimulatorPanelProvider implements vscode.WebviewViewProvider {
 
     const result = await sendSimulatorText(this.input, deviceUdid, text, submit);
     if (!result.ok) {
-      this.view?.webview.postMessage({
-        type: 'error',
-        message: result.error ?? '键盘输入失败',
-      });
+      this.surfaceError(result.error ?? '键盘输入失败', 'keyboard', result.error);
       return;
     }
     this.view?.webview.postMessage({ type: 'status', message: '文字已发送' });
@@ -524,10 +565,7 @@ export class SimulatorPanelProvider implements vscode.WebviewViewProvider {
     this.view?.webview.postMessage({ type: 'status', message: '正在保存截图…' });
     const result = await captureSimulatorScreenshot(deviceUdid);
     if (!result.ok) {
-      this.view?.webview.postMessage({
-        type: 'error',
-        message: result.error ?? '截图失败',
-      });
+      this.surfaceError(result.error ?? '截图失败', 'screenshot', result.error);
       return;
     }
 
@@ -727,6 +765,13 @@ export class SimulatorPanelProvider implements vscode.WebviewViewProvider {
 </body>
 </html>`;
   }
+}
+
+function errorDetail(err: unknown): string {
+  if (err instanceof Error) {
+    return err.stack ?? err.message;
+  }
+  return String(err);
 }
 
 function getNonce(): string {
