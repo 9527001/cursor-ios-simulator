@@ -2,7 +2,7 @@
   "name": "cursor-ios-simulator",
   "displayName": "iOS Simulator Mirror",
   "description": "Headless iOS Simulator mirror for Cursor/VS Code — real-time mirror, touch input, a11y annotations, device picker, keyboard.",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "publisher": "9527001",
   "license": "MIT",
   "homepage": "https://github.com/9527001/cursor-ios-simulator#readme",
@@ -62,7 +62,11 @@
         },
         "iosSimulator.platform": {
           "type": "string",
-          "enum": ["auto", "ios", "android"],
+          "enum": [
+            "auto",
+            "ios",
+            "android"
+          ],
           "default": "auto",
           "description": "镜像平台：auto（macOS 用 iOS，Windows/Linux 用 Android）/ ios / android。Android 模式通过 scrcpy 镜像，需安装 adb（Android SDK Platform-Tools）。修改后需重新加载窗口。"
         }
