@@ -30,6 +30,13 @@ import {
   StreamProfile,
 } from './smoothnessTuner';
 import { presentError } from './issueReporter';
+import { AndroidScrcpyHost, AndroidVideoMetadata, AndroidVideoPacket } from './androidScrcpyHost';
+import {
+  AndroidDevice,
+  isAdbAvailable,
+  listReadyAndroidDevices,
+} from './androidDeviceManager';
+import * as path from 'path';
 
 export class SimulatorPanelProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'ios-simulator.panel';
@@ -51,6 +58,9 @@ export class SimulatorPanelProvider implements vscode.WebviewViewProvider {
   private lastErrorKey: string | null = null;
   private lastErrorAt = 0;
   private static readonly ERROR_NOTIFY_WINDOW_MS = 15000;
+  private mode: 'ios' | 'android' = 'ios';
+  private androidHost: AndroidScrcpyHost | null = null;
+  private androidActiveSerial: string | null = null;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -106,15 +116,23 @@ export class SimulatorPanelProvider implements vscode.WebviewViewProvider {
     _token: vscode.CancellationToken,
   ): void {
     this.view = webviewView;
+    this.mode = this.resolveMode();
 
     webviewView.webview.options = {
       enableScripts: true,
       localResourceRoots: [this.extensionUri],
     };
 
-    webviewView.webview.html = this.getHtml(webviewView.webview);
+    webviewView.webview.html =
+      this.mode === 'android'
+        ? this.getAndroidHtml(webviewView.webview)
+        : this.getHtml(webviewView.webview);
 
     webviewView.webview.onDidReceiveMessage(async (msg) => {
+      if (this.mode === 'android') {
+        await this.handleAndroidMessage(msg);
+        return;
+      }
       switch (msg.type) {
         case 'ready':
           this.runStartupFlow();
@@ -239,8 +257,26 @@ export class SimulatorPanelProvider implements vscode.WebviewViewProvider {
     return Math.min(60, Math.max(8, fps));
   }
 
+  private resolveMode(): 'ios' | 'android' {
+    const setting = vscode.workspace
+      .getConfiguration('iosSimulator')
+      .get<string>('platform', 'auto');
+    if (setting === 'ios') {
+      return 'ios';
+    }
+    if (setting === 'android') {
+      return 'android';
+    }
+    return process.platform === 'darwin' ? 'ios' : 'android';
+  }
+
   /** Non-blocking startup: stream first, devices/auto-boot/prefetch in background. */
   private runStartupFlow(): void {
+    if (this.mode === 'android') {
+      void this.runAndroidStartup();
+      return;
+    }
+
     const generation = ++this.startupGeneration;
 
     const pf = runPreflight();
@@ -610,6 +646,138 @@ export class SimulatorPanelProvider implements vscode.WebviewViewProvider {
     this.frameRelay.reset();
     this.capture.stop();
     this.input.stop();
+    void this.stopAndroidStream();
+  }
+
+  // ===== Android (scrcpy) backend =====
+
+  private async runAndroidStartup(): Promise<void> {
+    this.view?.webview.postMessage({
+      type: 'status',
+      message: '正在检测 adb…',
+    });
+
+    if (!(await isAdbAvailable())) {
+      this.view?.webview.postMessage({
+        type: 'error',
+        message:
+          '未检测到 adb。请安装 Android SDK Platform-Tools，并设置 ANDROID_HOME 或将 adb 加入 PATH。',
+      });
+      return;
+    }
+
+    let devices: AndroidDevice[];
+    try {
+      devices = await listReadyAndroidDevices();
+    } catch {
+      devices = [];
+    }
+
+    if (devices.length === 0) {
+      this.view?.webview.postMessage({
+        type: 'status',
+        message: '未发现 Android 设备/模拟器，启动模拟器后点刷新',
+      });
+      return;
+    }
+
+    const target =
+      (this.androidActiveSerial &&
+        devices.find((d) => d.serial === this.androidActiveSerial)) ||
+      devices[0];
+    this.androidActiveSerial = target.serial;
+    await this.startAndroidStream(target.serial);
+  }
+
+  private async startAndroidStream(serial: string): Promise<void> {
+    await this.stopAndroidStream();
+
+    const host = new AndroidScrcpyHost();
+    this.androidHost = host;
+
+    host.on('metadata', (meta: AndroidVideoMetadata) => {
+      this.view?.webview.postMessage({
+        type: 'android-metadata',
+        codec: meta.codec,
+        width: meta.width,
+        height: meta.height,
+      });
+    });
+    host.on('packet', (packet: AndroidVideoPacket) => {
+      this.view?.webview.postMessage({ type: 'android-packet', packet });
+    });
+    host.on('error', (message: string) => {
+      this.surfaceError(message, 'android');
+    });
+    host.on('exit', () => {
+      this.view?.webview.postMessage({ type: 'android-stopped' });
+    });
+
+    const jar = path.join(
+      this.extensionPath,
+      'bin',
+      'scrcpy-server-v2.7.jar',
+    );
+    this.view?.webview.postMessage({
+      type: 'status',
+      message: `正在连接 ${serial}…`,
+    });
+
+    try {
+      await host.start({ serial, serverJarPath: jar });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.surfaceError(message, 'android', errorDetail(err));
+    }
+  }
+
+  private async stopAndroidStream(): Promise<void> {
+    const host = this.androidHost;
+    this.androidHost = null;
+    if (host) {
+      await host.stop().catch(() => {});
+    }
+  }
+
+  private async handleAndroidMessage(msg: {
+    type: string;
+    action?: number;
+    x?: number;
+    y?: number;
+    name?: string;
+    text?: string;
+  }): Promise<void> {
+    switch (msg.type) {
+      case 'ready':
+      case 'refresh':
+        await this.runAndroidStartup();
+        break;
+      case 'android-touch':
+        if (
+          typeof msg.action === 'number' &&
+          typeof msg.x === 'number' &&
+          typeof msg.y === 'number'
+        ) {
+          await this.androidHost?.sendTouch(msg.action, msg.x, msg.y);
+        }
+        break;
+      case 'android-key':
+        if (msg.name === 'home') {
+          await this.androidHost?.pressHome();
+        } else if (msg.name === 'back') {
+          await this.androidHost?.pressBack();
+        } else if (msg.name === 'recent') {
+          await this.androidHost?.pressAppSwitch();
+        }
+        break;
+      case 'android-text':
+        if (msg.text) {
+          await this.androidHost?.sendText(msg.text);
+        }
+        break;
+      default:
+        break;
+    }
   }
 
   private handleSwipe(
@@ -756,6 +924,56 @@ export class SimulatorPanelProvider implements vscode.WebviewViewProvider {
     <div id="keyboard-bar">
       <input id="keyboard-input" type="text" placeholder="输入文字，Enter 发送" />
       <button id="btn-kbd-send" title="发送">⏎</button>
+    </div>
+  </footer>
+  <script nonce="${nonce}" src="${scriptUri}"></script>
+</body>
+</html>`;
+  }
+
+  private getAndroidHtml(webview: vscode.Webview): string {
+    const styleUri = webview.asWebviewUri(
+      vscode.Uri.joinPath(this.extensionUri, 'media', 'panel.css'),
+    );
+    const scriptUri = webview.asWebviewUri(
+      vscode.Uri.joinPath(this.extensionUri, 'media', 'android-bundle.js'),
+    );
+    const nonce = getNonce();
+
+    return `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy"
+    content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}'; img-src ${webview.cspSource} data: blob:;" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="stylesheet" href="${styleUri}" />
+  <title>Android Simulator</title>
+  <style nonce="${nonce}">
+    #android-stage { display:flex; align-items:center; justify-content:center; flex:1; overflow:hidden; }
+    #android-screen { max-width:100%; max-height:100%; object-fit:contain; cursor:crosshair; }
+  </style>
+</head>
+<body>
+  <header class="toolbar">
+    <span id="android-status" class="status">Connecting…</span>
+    <div class="toolbar-actions">
+      <button id="android-btn-recent" title="最近任务">▭</button>
+      <button id="android-btn-home" title="Home">⌂</button>
+      <button id="android-btn-back" title="返回">‹</button>
+      <button id="android-btn-refresh" title="刷新">↻</button>
+    </div>
+  </header>
+  <main id="android-stage">
+    <div id="android-placeholder">
+      <p>等待 Android 设备 / 模拟器…</p>
+      <p class="hint">启动 Android 模拟器后点击右上角刷新 ↻</p>
+    </div>
+  </main>
+  <footer class="footer">
+    <div id="keyboard-bar">
+      <input id="android-kbd-input" type="text" placeholder="输入文字，Enter 发送" />
+      <button id="android-btn-kbd-send" title="发送">⏎</button>
     </div>
   </footer>
   <script nonce="${nonce}" src="${scriptUri}"></script>

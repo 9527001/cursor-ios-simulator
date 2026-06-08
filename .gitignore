@@ -1,7 +1,12 @@
 node_modules/
 out/
 dist/
-bin/
+bin/*
+# 第三方预下载二进制需入库（CI clone 拿不到），单独放行：
+!bin/scrcpy-server-*.jar
+# esbuild 构建产物（prepublish 重新生成）：
+media/android-bundle.js
+media/android-bundle.js.map
 *.vsix
 .DS_Store
 .vscode-test/

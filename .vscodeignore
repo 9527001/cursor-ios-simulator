@@ -4,6 +4,7 @@ node_modules/**
 .gitignore
 .github/**
 tsconfig.json
+esbuild.js
 **/*.ts
 **/*.map
 !src/helpers/**

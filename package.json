@@ -59,6 +59,12 @@
           "type": "boolean",
           "default": true,
           "description": "根据卡顿自动调节 fps / 分辨率 / JPEG 质量（推荐开启）。"
+        },
+        "iosSimulator.platform": {
+          "type": "string",
+          "enum": ["auto", "ios", "android"],
+          "default": "auto",
+          "description": "镜像平台：auto（macOS 用 iOS，Windows/Linux 用 Android）/ ios / android。Android 模式通过 scrcpy 镜像，需安装 adb（Android SDK Platform-Tools）。修改后需重新加载窗口。"
         }
       }
     },
@@ -102,21 +108,32 @@
   },
   "scripts": {
     "setup": "bash scripts/setup.sh",
-    "build": "npm run compile && npm run compile-helpers",
-    "compile": "tsc -p ./",
-    "watch": "tsc -watch -p ./",
+    "build": "npm run check-types && npm run bundle && npm run compile-helpers",
+    "check-types": "tsc --noEmit -p ./",
+    "compile": "npm run check-types && npm run bundle",
+    "bundle": "node esbuild.js",
+    "bundle:prod": "node esbuild.js --production",
+    "watch": "node esbuild.js --watch",
     "compile-helpers": "bash scripts/compile-helpers.sh bin",
     "package": "mkdir -p dist && vsce package --out dist/cursor-ios-simulator.vsix",
     "install:local": "bash scripts/install-local.sh",
     "install:vscode": "EDITOR=code bash scripts/install-local.sh",
     "publish:openvsx": "bash scripts/publish-openvsx.sh --publish",
     "release": "bash scripts/release.sh",
-    "vscode:prepublish": "npm run compile && npm run compile-helpers"
+    "vscode:prepublish": "npm run check-types && npm run bundle:prod && npm run compile-helpers"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",
     "@types/vscode": "^1.85.0",
     "@vscode/vsce": "^3.2.1",
+    "esbuild": "^0.28.0",
     "typescript": "^5.3.3"
+  },
+  "dependencies": {
+    "@yume-chan/adb": "^2.6.0",
+    "@yume-chan/adb-scrcpy": "^2.3.2",
+    "@yume-chan/adb-server-node-tcp": "^2.5.2",
+    "@yume-chan/scrcpy": "^2.3.0",
+    "@yume-chan/scrcpy-decoder-webcodecs": "^2.5.3"
   }
 }
