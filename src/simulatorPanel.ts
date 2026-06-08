@@ -248,16 +248,13 @@ export class SimulatorPanelProvider implements vscode.WebviewViewProvider {
       this.preflightOk = false;
       const message = pf.message ?? 'Preflight failed.';
       const hint = pf.hint ?? '';
+      // Preflight 失败属环境限制（非 macOS / 缺 Xcode），不是代码 bug，
+      // 只在面板内提示并附排查指引，不弹 GitHub 上报，避免噪音 issue。
       this.view?.webview.postMessage({
         type: 'preflight-failed',
         message,
         hint,
       });
-      this.maybeNotifyError(
-        message,
-        'preflight',
-        hint ? `${message}\n\n${hint}` : message,
-      );
       return;
     }
     this.preflightOk = true;
